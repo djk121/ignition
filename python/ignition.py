@@ -1,4 +1,4 @@
-#!/usr/bin/env - python
+#!/usr/bin/env python3
 
 import serial
 import struct
@@ -8,12 +8,14 @@ import argparse
 import os
 import emoji
 
+from threading import Thread
+
 
 # [
 # [index, delay until next pin, [fire pin, fire pin2, fire pin 3, ...]],
 # 
-CONFIG_FILE = 'ignition.json'
-RECOVERY_FILE = 'ignition_recovery.json'
+CONFIG_FILE = 'configs/ignition.json'
+RECOVERY_FILE = 'configs/ignition_recovery.json'
 
 class FiringException(Exception):
     def __init__(self, firing_state, current_set):
@@ -32,72 +34,92 @@ def setup_serial(ser_port, rate):
 
 
 def display_show(firing_order, start_set):
-    print "I'm going to run this show; starting at set %i with %i total sets:" % (start_set, len(firing_order))
+    print("I'm going to run this show; starting at set {} with {} total sets:".format(start_set, len(firing_order)))
     total_time = 0
     for idx, fire_command in enumerate(firing_order):
         if idx < start_set:
-            print "Skipping set", idx
+            print("Skipping set {}".format(idx))
             continue
-        print "Set:", idx 
-        print "\tfire pins:", fire_command[1]
-        print "\tthen delay:", fire_command[0], "seconds"
+        print("Set: {}".format(idx))
+        print("\tfire pins: {}".format(fire_command[1]))
+        print("\tthen delay: {} seconds".format(fire_command[0]))
         total_time = total_time + fire_command[0]
-    print "Total show time is", total_time, "seconds"
+    print("Total show time is {} seconds.".format(total_time))
 
+
+def input_thread(keyboard_buffer):
+    input()
+    keyboard_buffer.append(None)
 
 
 def write_recovery(last_set, pin):
     pass
 
-def run_show(firing_order, start_set = 0):
-    
+def run_show(firing_order, start_set = 0, dry_run=True):
 
-    ser = setup_serial('/dev/tty.usbserial-DA01GYCL', 9600)
+
+    if not dry_run:
+        ser = setup_serial('/dev/tty.usbserial-DA01GYCL', 9600)
 
     for idx, fire_command in enumerate(firing_order):
         if idx < start_set:
-            print "\nSkipping set", idx
+            print("\nSkipping set {}".format(idx))
             continue
 
-        comm_status = comm_check(ser)
-        print "\nRunning set", idx
+        if not dry_run:
+            comm_status = comm_check(ser)
+        print("\nRunning set {}".format(idx))
         delay_in_seconds = fire_command[0]
-        print '\tFiring pin(s)', fire_command[1],
-        ret = fire(ser, fire_command[1])
+        print('\tFiring pin(s) {}'.format(fire_command[1]))
+        if not dry_run:
+            ret = fire(ser, fire_command[1])
+        else:
+            print("\tXXX DRY RUN NOT FIRING XXX")
+            ret = 0
+
         if ret != 0:
             with open(RECOVERY_FILE, 'wt') as rf:
                 rf.write('[%i, %i]\n' % (idx, ret))
                 rf.close()
-            print "\n\nI didn't get an OK from the firing computer for set", idx, "pin", ret
-            print "Recovery file '%s' written; run with -r to retry from set %i." % (RECOVERY_FILE, idx)
+            print("\n\nI didn't get an OK from the firing computer for set {} pin {}".format(idx, ret))
+            print("Recovery file '{}' written; run with -r to retry from set {}.".format(RECOVERY_FILE, idx))
             exit()
 
-        print '\tSleeping', delay_in_seconds, 'seconds'
-        time.sleep(delay_in_seconds)
+        print('\tSleeping {} seconds; press "s" to skip.'.format(delay_in_seconds))
+
+#        time.sleep(delay_in_seconds)
+        keyboard_buffer = []
+        t = Thread(target=input_thread, args=(keyboard_buffer,))
+        t.start()
+        while delay_in_seconds > 0:
+            time.sleep(1)
+            delay_in_seconds = delay_in_seconds - 1
+            print("\t{} seconds remaining\r".format(delay_in_seconds), end='\r')
+            if keyboard_buffer: break
 
 def comm_check(ser):
-    print "Checking serial connectivity:",
-    print emoji.emojize(":clock1:", use_aliases=True),
+    print("Checking serial connectivity:")
+    print(emoji.emojize(":clock1:", use_aliases=True))
     ser.write(struct.pack("cb", "K", 0))
     status = ser.read()
     if status != 'A':
-        print emoji.emojize(":x:", use_aliases=True),
+        print(emoji.emojize(":x:", use_aliases=True))
         return 1 
-    print emoji.emojize(":100:", use_aliases=True),
-    print "\n"
+    print(emoji.emojize(":100:", use_aliases=True))
+    print("\n")
     return 0
 
 def fire(ser, pins):
     for pin in pins:
-        print emoji.emojize(":fire:  :fireworks: "),
+        print (emoji.emojize(":fire:  :fireworks: "))
         ser.write(struct.pack("cb", "H", pin))
         status = ser.read()
         if status != 'A':
-            return pin 
-        print emoji.emojize(":sparkles:"),
-    print "\n"
+            return pin
+        print(emoji.emojize(":sparkles:"))
+    print("\n")
     return 0
-            
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-c", "--comm", help="Check communication with the arduino and exit",
@@ -115,7 +137,7 @@ def main():
                         action="store_true")
     args = parser.parse_args()
 
-    print args
+    print(args)
 
     firing_order = load_firing_order()
     start_set = 0
@@ -140,16 +162,19 @@ def main():
             recovery_point = json.load(rf)
             rf.close()
             os.unlink(RECOVERY_FILE)
-            print "Recovering to (zero-indexed) set:", recovery_point[0]
+            print("Recovering to (zero-indexed) set: {}".format(recovery_point[0]))
             start_set = recovery_point[0]
 
+    dry_run = True
     if not args.gogogo:
-        print "No --gogogo so running in dry run mode, will not trigger any pins."
+        print("No --gogogo so running in dry run mode, will not trigger any pins.")
 
     display_show(firing_order, start_set)
 
     if args.gogogo:
-        run_show(firing_order, start_set=start_set)
+        dry_run = False
+
+    run_show(firing_order, start_set=start_set, dry_run=dry_run)
 
 
 if __name__ == '__main__':

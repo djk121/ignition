@@ -59,23 +59,20 @@ def run_show(firing_order, start_set = 0, dry_run=True):
 
 
     if not dry_run:
-        ser = setup_serial('/dev/tty.usbserial-DA01GYCL', 9600)
+        ser = setup_serial('/dev/tty.usbserial-DA01L2G9', 9600)
+    else:
+        ser = None
 
     for idx, fire_command in enumerate(firing_order):
         if idx < start_set:
             print("\nSkipping set {}".format(idx))
             continue
 
-        if not dry_run:
-            comm_status = comm_check(ser)
+        comm_status = comm_check(ser, dry_run)
         print("\nRunning set {}".format(idx))
         delay_in_seconds = fire_command[0]
-        print('\tFiring pin(s) {}'.format(fire_command[1]))
-        if not dry_run:
-            ret = fire(ser, fire_command[1])
-        else:
-            print("\tXXX DRY RUN NOT FIRING XXX")
-            ret = 0
+        print('\tFiring pin(s) {}'.format(fire_command[1]), end="")
+        ret = fire(ser, fire_command[1], dry_run)
 
         if ret != 0:
             with open(RECOVERY_FILE, 'wt') as rf:
@@ -97,26 +94,32 @@ def run_show(firing_order, start_set = 0, dry_run=True):
             print("\t{} seconds remaining\r".format(delay_in_seconds), end='\r')
             if keyboard_buffer: break
 
-def comm_check(ser):
+def comm_check(ser, dry_run=True):
     print("Checking serial connectivity:")
-    print(emoji.emojize(":clock1:", use_aliases=True))
-    ser.write(struct.pack("cb", "K", 0))
-    status = ser.read()
-    if status != 'A':
-        print(emoji.emojize(":x:", use_aliases=True))
-        return 1 
-    print(emoji.emojize(":100:", use_aliases=True))
+    print(emoji.emojize(" :clock1: ", use_aliases=True), end="")
+    if not dry_run:
+        ser.write(struct.pack("cb", b'K', 0))
+        status = ser.read()
+        if status != b'A':
+            print(emoji.emojize(" :x: ", use_aliases=True))
+            return 1
+    else:
+        print("XXX DRY RUN XXX", end="")
+    print(emoji.emojize(" :100: ", use_aliases=True), end="")
     print("\n")
     return 0
 
-def fire(ser, pins):
+def fire(ser, pins, dry_run=True):
     for pin in pins:
-        print (emoji.emojize(":fire:  :fireworks: "))
-        ser.write(struct.pack("cb", "H", pin))
-        status = ser.read()
-        if status != 'A':
-            return pin
-        print(emoji.emojize(":sparkles:"))
+        print (emoji.emojize(" :fire:  :fireworks: "), end="")
+        if not dry_run:
+            ser.write(struct.pack("cb", b'H', pin))
+            status = ser.read()
+            if status != b'A':
+                return pin
+        else:
+            print("XXX DRY RUN XXX", end="")
+        print(emoji.emojize(" :sparkles: "), end="")
     print("\n")
     return 0
 
@@ -124,7 +127,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-c", "--comm", help="Check communication with the arduino and exit",
                         action="store_true")
-    parser.add_argument("-t", "--test", help="Trigger each pin in order, sleeping for 3 seconds",
+    parser.add_argument("-a", "--all_pins", help="Trigger each pin in order, sleeping for 3 seconds",
                         action="store_true")
     parser.add_argument("-r", "--recover", help="Recover from a failed run",
                         action="store_true")
@@ -150,10 +153,10 @@ def main():
         firing_order = []
         firing_order.append([0, [args.fire]])
     elif args.comm:
-        ser = setup_serial('/dev/tty.usbserial-DA01GYCL', 9600)
-        comm_check(ser)
+        ser = setup_serial('/dev/tty.usbserial-DA01L2G9', 9600)
+        comm_check(ser, False)
         exit()
-    elif args.test:
+    elif args.all_pins:
         firing_order = []
         for pin in range(26, 50):
             firing_order.append([0, [pin]])
